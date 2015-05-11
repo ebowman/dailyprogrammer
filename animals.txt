@@ -1,0 +1,39 @@
+mouse
+a mammal
+claws,a tail
+
+eagle
+big,fast
+claws
+
+dog
+domesticated,a companion,friendly,a mammal,fast
+paws,a tail,fur
+
+dolphin
+big
+a fin
+
+eagle
+a bird
+a talon
+
+cat
+domesticated,cute,independant,mysterious,a mammal
+paws,a tail,fur,claws
+
+cow
+big,a farm animal,a mammal
+spots,udders,a tail,hooves
+
+horse
+big,fast,a mammal
+a mane,a tail,hooves
+
+eagle
+big
+a tail,a beak
+
+pigeon
+a bird,annoying
+feathers,wings,a beak
