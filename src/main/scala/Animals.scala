@@ -130,6 +130,7 @@ paws,a tail,fur,claws
         io.StdIn.readLine().split("\\s+").toList match {
           case "is" :: prop => (is + prop.mkString(" "), has)
           case "has" :: prop => (is, has + prop.mkString(" "))
+          case _ => ???
         }
     }
     save(animals + Animal(name, newIs.map(Is.apply) ++ newHas.map(Has.apply)))
