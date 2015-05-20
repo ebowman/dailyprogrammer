@@ -1,5 +1,7 @@
 import java.util
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.{CountDownLatch, Executors}
+
+import scala.language.implicitConversions
 
 object PileOfPaperOn2 extends App {
   //  val iter = io.Source.fromString(
@@ -163,7 +165,7 @@ object PileOfPaper2On extends App {
 
   case class Board(width: Int, height: Int)
 
-  case class Sheet(color: Int, width: Int, height: Int, x: Int, y: Int) {
+  final case class Sheet(color: Int, width: Int, height: Int, x: Int, y: Int) {
     @inline def intersects(x: Int, y: Int): Boolean = x >= this.x && x < this.x + width && y >= this.y && y < this.y + height
   }
 
@@ -178,30 +180,57 @@ object PileOfPaper2On extends App {
       line => line.split("\\s+").map(_.toInt).grouped(5).map {
         case Array(color, width, height, x, y) => Sheet(color, x, y, width, height)
       }
-    }.toSeq.reverse
+    }.toSeq.reverse.toArray
 
 
-    val blackboard = Array.fill(sheets.map(_.color).max + 1)(new AtomicLong)
+    val threadCount = 5
+    val blackboards = Array.fill(threadCount)(Array.fill(sheets.map(_.color).max + 1)(0L))
+    val executor = Executors.newFixedThreadPool(threadCount)
 
-    val groupSize = 10000
-    (0 until board.height) foreach { y =>
-      if ((y % 10000) == 0) println(y)
-      (0 until board.width).grouped(groupSize).foreach { case group =>
-        group.par.map { case x =>
-          sheets.find(_.intersects(x, y)) match {
-            case None => blackboard(0).incrementAndGet()
-            case Some(sheet) => blackboard(sheet.color).incrementAndGet()
-          }
-        }
+    implicit def f2r(fun: => Unit): Runnable = new Runnable {
+      def run() {
+        fun
       }
     }
 
-    blackboard.map(_.get).zipWithIndex.filterNot(_._1 == 0)
+    val latch = new CountDownLatch(threadCount)
+    for (block <- 0 until threadCount) {
+      executor.submit {
+        var y = block * board.height / threadCount
+        val rowMax = (block + 1) * board.height / threadCount
+        val blackboard = blackboards(block)
+        while (y < rowMax) {
+          var x = 0
+          while (x < board.width) {
+            // if ((x % 10000) == 0 && (y % 1000) == 0) println((x, y))
+            var (i, done) = (0, false)
+            val sheetCount = sheets.length
+            while (!done && i < sheetCount) {
+              val curSheet = sheets(i)
+              if (curSheet.intersects(x, y)) {
+                blackboard(curSheet.color) += 1
+                done = true
+              }
+              i += 1
+            }
+            if (!done) blackboard(0) += 1
+            x += 1
+          }
+          y += 1
+        }
+        latch.countDown()
+      }
+    }
+    executor.shutdown()
+    latch.await()
+    (for (i <- 0 until sheets.map(_.color).max + 1) yield {
+      blackboards.map(b => b(i)).sum
+    }).zipWithIndex.filterNot(_._1 == 0)
   }
 
   val ls = {
     import scala.sys.process._
-    "ls src/main/resources/piles/".lineStream.filter(_.endsWith(".in")) //.filter(_.contains("100x100"))
+    "ls src/main/resources/piles/".lineStream.toSeq.filter(_.endsWith(".in")) //.filter(_.contains("10Kx10K"))
   }
 
   def lines(f: String): Iterator[String] = io.Source.fromFile(s"src/main/resources/piles/$f").getLines()
@@ -216,5 +245,135 @@ object PileOfPaper2On extends App {
       case (count, color) => s"$color $count"
     }.mkString("\n"))
     println(s"sum = ${solution.map(_._1).sum}")
+  }
+}
+
+object PileOfPaperFast extends App {
+
+  object Rect {
+    val Empty = Rect(0, 0, 0, 0, 0)
+  }
+
+  case class Rect(color: Int, x: Int, y: Int, width: Int, height: Int) {
+    def isEmpty = width <= 0 || height <= 0
+
+    def contains(x: Int, y: Int) = x >= this.x && y >= this.y && x < this.x + width && y < this.y + height
+
+    def area = width * height.toLong
+
+    def clip(r: Rect): Rect = {
+      if (r.x + r.width <= x) Rect.Empty
+      else if (r.x >= x + width) Rect.Empty
+      else if (r.y + r.height <= y) Rect.Empty
+      else if (r.y >= y + height) Rect.Empty
+      else {
+        val newX = math.max(x, r.x)
+        val newY = math.max(y, r.y)
+        val newWidth = math.min(r.width, math.min(x + width, r.x + r.width) - newX)
+        val newHeight = math.min(r.height, math.min(y + height, r.y + r.height) - newY)
+        r.copy(x = newX, y = newY, width = newWidth, height = newHeight)
+      }
+    }
+
+    def cover(rect: Rect): Set[Rect] = {
+      val isect = {
+        val r = clip(rect)
+        if (x == r.x && y == r.y && width == r.width && height == r.height) Set.empty[Rect]
+        else if (rect.x + rect.width <= x) Set(this, rect)
+        else if (rect.x >= x + width) Set(this, rect)
+        else if (rect.y + rect.height <= y) Set(this, rect)
+        else if (rect.y >= y + height) Set(this, rect)
+        else if (clip(rect).isEmpty) Set(this, rect)
+        else {
+          (r.y - y, r.x - x, x + width - (r.x + r.width), y + height - (r.y + r.height)) match {
+            case (0, 0, 0, heightBottom) =>
+              Set(Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (0, 0, widthRight, 0) =>
+              Set(Rect(color, x + width - widthRight, y, widthRight, height))
+            case (0, widthLeft, 0, 0) =>
+              Set(Rect(color, x, y, widthLeft, height))
+            case (heightTop, 0, 0, 0) =>
+              Set(Rect(color, x, y, width, heightTop))
+            case (0, widthLeft, 0, heightBottom) =>
+              Set(Rect(color, x, y, widthLeft, height - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (heightTop, 0, widthRight, 0) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x + width - widthRight, y + heightTop, widthRight, height - heightTop))
+            case (0, 0, widthRight, heightBottom) =>
+              Set(Rect(color, x + width - widthRight, y, widthRight, height - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (heightTop, widthLeft, 0, 0) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x, y + heightTop, widthLeft, height - heightTop))
+            case (0, widthLeft, widthRight, 0) =>
+              Set(Rect(color, x, y, widthLeft, height),
+                Rect(color, x + width - widthRight, y, widthRight, height))
+            case (heightTop, 0, 0, heightBottom) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (0, widthLeft, widthRight, heightBottom) =>
+              Set(Rect(color, x, y, widthLeft, height - heightBottom),
+                Rect(color, x + width - widthRight, y, widthRight, height - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (heightTop, 0, widthRight, heightBottom) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x + width - widthRight, y + heightTop, widthRight, height - heightTop - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (heightTop, widthLeft, 0, heightBottom) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x, y + heightTop, widthLeft, height - heightTop - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+            case (heightTop, widthLeft, widthRight, 0) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x, y + heightTop, widthLeft, height - heightTop),
+                Rect(color, x + width - widthRight, y + heightTop, widthRight, height - heightTop))
+            case (heightTop, widthLeft, widthRight, heightBottom) =>
+              Set(Rect(color, x, y, width, heightTop),
+                Rect(color, x, y + heightTop, widthLeft, height - heightTop - heightBottom),
+                Rect(color, x + width - widthRight, y + heightTop, widthRight, height - heightTop - heightBottom),
+                Rect(color, x, y + height - heightBottom, width, heightBottom))
+          }
+        }
+      }
+      isect.map(clip).filterNot(_.isEmpty)
+    }
+  }
+
+  val files = {
+    import scala.sys.process._
+    "ls src/main/resources/piles/".!!
+  }
+  for (file <- files.lines.toSeq.filter(_ endsWith ".in")) {
+    println(file)
+    val source = io.Source.fromFile(s"src/main/resources/piles/$file").getLines()
+    val background = {
+      val line = source.next().split("\\s+").map(_.toInt)
+      Rect(0, 0, 0, line(0), line(1))
+    }
+    val sheets = background :: source.flatMap {
+      line => line.split("\\s+").map(_.toInt).grouped(5).map {
+        case Array(color, x, y, width, height) => Rect(color, x, y, width, height)
+      }
+    }.toList
+
+    @scala.annotation.tailrec
+    def solve(visible: Seq[Rect], sheets: List[Rect]): Seq[Rect] = {
+      if (sheets.isEmpty) visible
+      else solve(visible.flatMap(_.cover(sheets.head)) :+ sheets.head, sheets.tail)
+    }
+
+    def time[T](f: =>T): T = {
+      val start = System.currentTimeMillis()
+      val result = f
+      println(s"${System.currentTimeMillis() - start} ms")
+      result
+    }
+
+    val solution = time(solve(Seq(sheets.head), sheets.tail))
+    val groups = solution.groupBy(_.color)
+
+    println(groups.mapValues(_.map(_.area).sum).toSeq.sortBy(_._1).map(cc => s"${cc._1} ${cc._2}").mkString("\n"))
+    println()
   }
 }

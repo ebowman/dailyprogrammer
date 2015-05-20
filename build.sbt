@@ -5,7 +5,8 @@ doctestSettings
 doctestWithDependencies := false
 doctestTestFramework := DoctestTestFramework.ScalaTest
 
-scalacOptions += "-Xfatal-warnings"
+//scalacOptions += "-Xfatal-warnings -feature"
+scalacOptions += "-feature"
 
 libraryDependencies ++= Seq(
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.4",
