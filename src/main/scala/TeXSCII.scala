@@ -1,8 +1,9 @@
 package texscii
 
-import scala.util.parsing.combinator.RegexParsers
+import scala.util.parsing.combinator.{PackratParsers, RegexParsers}
+import scala.util.parsing.input.CharSequenceReader
 
-object TeXSCII extends RegexParsers with App {
+object TeXSCII extends RegexParsers with PackratParsers with App {
 
   sealed trait TextBlock {
     def text: Seq[String]
@@ -12,6 +13,8 @@ object TeXSCII extends RegexParsers with App {
     def height = text.size
 
     def print: String = text.mkString("\n")
+
+    override def toString = print
 
     def vcenter(height: Int): TextBlock = {
       require(height >= this.height)
@@ -45,12 +48,13 @@ object TeXSCII extends RegexParsers with App {
 
   def append(blocks: Seq[TextBlock]): TextBlock = {
     require(blocks.tail.forall(_.height == blocks.head.height))
-    new TextBlock {
+    if (blocks.size == 1) blocks.head
+    else new TextBlock {
       val text = for {
         y <- 0 until blocks.head.height
       } yield {
-        blocks.map(block => block.text(y)).mkString
-      }
+          blocks.map(block => block.text(y)).mkString
+        }
     }
   }
 
@@ -115,42 +119,44 @@ object TeXSCII extends RegexParsers with App {
 
   def print(t: TextBlock): Unit = println(t.text.mkString("\n"))
 
-//  println(Sqrt(3, Frac(Number(100), Number(20000))).print)
-//  println(Super(Sqrt(2, Number(2)), Number(100)).print)
-//  println(Super(Number(5), Number(3)).print)
-//  println(Super(Number(5), Number(3)).print)
-//  println(Sub(Token("N"), Number(12)).print)
-//  println(SuperSub(Token("N"), Number(12000), Number(2)).print)
+  //  println(Sqrt(3, Frac(Number(100), Number(20000))).print)
+  //  println(Super(Sqrt(2, Number(2)), Number(100)).print)
+  //  println(Super(Number(5), Number(3)).print)
+  //  println(Super(Number(5), Number(3)).print)
+  //  println(Sub(Token("N"), Number(12)).print)
+  //  println(SuperSub(Token("N"), Number(12000), Number(2)).print)
 
-  def intArg: Parser[Int] = "{" ~> """[\d+]+""".r <~ "}" ^^ { case num => num.toInt }
+  lazy val intArg: PackratParser[Int] = log("{" ~> """[\d+]+""".r <~ "}" ^^ { case num => num.toInt })("intArg")
 
-  def arg: Parser[TextBlock] = ("{" ~> expr) <~ "}" ^^ { case any => any }
+  lazy val arg: PackratParser[TextBlock] = log(("{" ~> expr) <~ "}" ^^ { case any => any })("arg")
 
-  def token: Parser[TextBlock] = """[^\\^{}_]+""".r ^^ { case str => println(s"Found token $str"); Token(str) }
+  lazy val token: PackratParser[TextBlock] = log("""[^\\^{}_]+""".r ^^ { case str => println(s"Found token $str"); Token(str) })("token")
 
-  def pi: Parser[TextBlock] = """\pi""" ^^ { case _ => Pi }
+  lazy val pi: PackratParser[TextBlock] = log("""\pi""" ^^ { case _ => Pi })("pi")
 
-  def frac: Parser[TextBlock] = """\frac""" ~> arg ~ arg ^^ { case top ~ bottom => Frac(top, bottom) }
+  lazy val frac: PackratParser[TextBlock] = log("""\frac""" ~> arg ~ arg ^^ { case top ~ bottom => Frac(top, bottom) })("frac")
 
-  def sqrt: Parser[TextBlock] = """\sqrt""" ~> arg ^^ { case arg => Root(2, arg) }
+  lazy val sqrt: PackratParser[TextBlock] = """\sqrt""" ~> arg ^^ { case arg => Root(2, arg) }
 
-  def root: Parser[TextBlock] = """\root""" ~> intArg ~ arg ^^ { case power ~ arg => Root(power, arg) }
+  lazy val root: PackratParser[TextBlock] = """\root""" ~> intArg ~ arg ^^ { case power ~ arg => Root(power, arg) }
 
-//  def sub: Parser[TextBlock] = (expr <~ "_") ~ arg ^^ { case context ~ sub => Sub(context, sub) }
-//
-//  def sup: Parser[TextBlock] = (expr <~ "^") ~ arg ^^ { case context ~ sub => Super(context, sub) }
-//
-//  def supSub: Parser[TextBlock] = (expr <~ "_") ~ arg ~ ("^" ~> arg) ^^ { case context ~ sub ~ sup => SuperSub(context, sup, sub) }
+  lazy val sub: Parser[TextBlock] = (expr <~ "_") ~ arg ^^ { case context ~ sub => Sub(context, sub) }
 
-  def any: Parser[TextBlock] = token | pi | frac | sqrt | root //| supSub | sub | sup
+  lazy val sup: PackratParser[TextBlock] = log((expr <~ "^") ~ arg ^^ { case context ~ sub => Super(context, sub) })("sup")
 
-  def expr: Parser[TextBlock] = rep1(any) ^^ { case bits => append(bits.map(_.vcenter(bits.map(_.height).max))) }
+  lazy val supSub: Parser[TextBlock] = (expr <~ "_") ~ arg ~ ("^" ~> arg) ^^ { case context ~ sub ~ sup => SuperSub(context, sup, sub) }
 
-  println(parseAll(expr, "77"))
+  lazy val any: PackratParser[TextBlock] = token | pi | frac | sqrt | root | sup | supSub | sub | sup
+
+  lazy val expr: PackratParser[TextBlock] = rep1(any) ^^ { case bits => append(bits.map(_.vcenter(bits.map(_.height).max))) }
+
+  def parseAll[T](p: Parser[T], input: String) = phrase(p)(new PackratReader(new CharSequenceReader(input)))
+
+  println(parseAll(expr, "77+22^{22}"))
   //println(parseAll(any, "\\pi^{2}"))
   //println(parseAll(any, "\\pi^{2}"))
-//  println(parseAll(arg, "{x^{2}}"))
-//  println(parseAll(any, "\\sqrt{2}"))
+  //  println(parseAll(arg, "{x^{2}}"))
+  //  println(parseAll(any, "\\sqrt{2}"))
   //println(parseAll(any, "\\root{2}{x^2}"))
   //println(parseAll(sub, "foo_{e}"))
   //println(parseAll(any, "log _{e}"))
