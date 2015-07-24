@@ -27,4 +27,13 @@ object WordBalance extends App {
   println(balance("WRONGHEADED"))
   println(balance("UNINTELLIGIBILITY"))
   println(balance("DOESNOTBALANCE"))
+
+  println(balance("ZALANDO"))
+  println(balance("ZALANDOTECH"))
+  println(balance("HELSINKI"))
+  println(balance("PEKKA"))
+  println(balance("RADICALAGILITY"))
+
+  val lines = io.Source.fromFile("/usr/share/dict/words").getLines().map(_.toUpperCase)
+  lines.filterNot(w =>balance(w).contains("DOES NOT BALANCE")).foreach(w => println((w, balance(w))))
 }
